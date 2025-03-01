@@ -1,5 +1,8 @@
+use std::env;
 use std::error::Error;
 use std::{collections::HashMap, fs, io, path::PathBuf, process::Command};
+
+use regex::Regex;
 
 pub mod cli;
 mod templates;
@@ -53,17 +56,63 @@ fn run_nvim(args: &Vec<String>) -> io::Result<()> {
     Ok(())
 }
 
+fn create_symlink() {
+    let symlink = get_config_dir().join("lua").join("plugins");
+    let nvim_plugins = env::current_dir().unwrap().join(".nvim").join("plugins");
+    match std::os::unix::fs::symlink(nvim_plugins, symlink) {
+        io::Result::Err(e) => {
+            if e.kind() == io::ErrorKind::AlreadyExists {
+                println!("Plugins symlink already exists.");
+            } else {
+                panic!("Error creating symlink: {e}");
+            }
+        }
+        Ok(_) => {}
+    }
+}
+
 fn run_init(template: &str) {
     if TEMPLATES.contains(&template) || template == "default" {
         create_envim_dir();
         deploy_template(template);
+        create_symlink();
     } else {
         panic!("Template not found");
     }
 }
 
-fn add_package(package_name: &str) {
-    
+fn add_package(plugin: &str) {
+    let plugins_path = PathBuf::from(".nvim").join("plugins");
+    match fs::create_dir_all(&plugins_path) {
+        io::Result::Err(e) => {
+            if e.kind() == io::ErrorKind::AlreadyExists {
+                println!("Directory already exists");
+            } else {
+                panic!("Error creating directory: {e}");
+            }
+        }
+        Ok(_) => {}
+    }
+
+    let re = Regex::new(r".+/(?<plugin_name>[^\.]+)(?:.nvim)*").unwrap();
+    let Some(caps) = re.captures(plugin) else {
+        panic!("Plugin name doesn't conform with {{author}}/{{plugin-name (without any dots)}}(.nvim)*")
+    };
+
+    let plugin_name = &caps["plugin_name"];
+
+    let plugin_config = r#"return {
+          "%name",
+          opts = {},
+          lazy = false
+        }
+    "#;
+
+    let plugin_file_content = plugin_config.replace("%name", plugin);
+    let file_path = plugins_path.join(format!("{}.lua", plugin_name));
+    fs::write(file_path, plugin_file_content).unwrap_or_else(|e| {
+        panic!("Error creating plugin config file: {}", e);
+    });
 }
 
 pub fn run(args: &cli::ClArgs) -> Result<(), Box<dyn Error>> {
