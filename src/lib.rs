@@ -16,9 +16,26 @@ fn create_envim_dir() {
     };
 }
 
-fn get_config_dir() -> PathBuf {
+fn get_current_config_dir() -> PathBuf {
     let envim_dir = PathBuf::from(".envim");
     envim_dir.join("config").join("nvim")
+}
+
+fn get_data_dir() -> PathBuf {
+    if false {
+        let Some(envim_dir) = homedir::my_home().unwrap() else {
+            panic!("Home directory not accessible");
+        };
+
+        let data_dir = envim_dir.join(".local").join("share").join(".envim");
+        if !fs::exists(&data_dir).unwrap() {
+            fs::create_dir_all(&data_dir).expect("Couldn't create data directory");
+        }
+
+        return data_dir;
+    }
+
+    PathBuf::from(".")
 }
 
 fn deploy_template(template: &str) {
@@ -57,7 +74,7 @@ fn run_nvim(args: &Vec<String>) -> io::Result<()> {
 }
 
 fn create_symlink() {
-    let symlink = get_config_dir().join("lua").join("plugins");
+    let symlink = get_current_config_dir().join("lua").join("plugins");
     let nvim_plugins = env::current_dir().unwrap().join(".nvim").join("plugins");
     match std::os::unix::fs::symlink(nvim_plugins, symlink) {
         io::Result::Err(e) => {
@@ -81,7 +98,7 @@ fn run_init(template: &str) {
     }
 }
 
-fn add_package(plugin: &str) {
+fn add_plugin(plugin: &str) {
     let plugins_path = PathBuf::from(".nvim").join("plugins");
     match fs::create_dir_all(&plugins_path) {
         io::Result::Err(e) => {
@@ -94,22 +111,42 @@ fn add_package(plugin: &str) {
         Ok(_) => {}
     }
 
-    let re = Regex::new(r".+/(?<plugin_name>[^\.]+)(?:.nvim)*").unwrap();
+    let re = Regex::new(r"(?<author>.+)/(?<plugin_name>.+)").unwrap();
     let Some(caps) = re.captures(plugin) else {
         panic!("Plugin name doesn't conform with {{author}}/{{plugin-name (without any dots)}}(.nvim)*")
     };
 
     let plugin_name = &caps["plugin_name"];
+    let author = &caps["author"];
 
-    let plugin_config = r#"return {
-          "%name",
-          opts = {},
-          lazy = false
-        }
-    "#;
+    let spec_v = vec![
+        "index",
+        "plugins",
+        author,
+        plugin_name,
+        "default",
+        "lazy",
+        "spec.lua",
+    ];
 
-    let plugin_file_content = plugin_config.replace("%name", plugin);
+    let spec = spec_v.iter().fold(get_data_dir(), |acc, x| acc.join(x));
+
     let file_path = plugins_path.join(format!("{}.lua", plugin_name));
+    let plugin_file_content;
+
+    if fs::exists(&spec).unwrap() {
+        plugin_file_content = fs::read_to_string(&spec).unwrap();
+        println!("Using default spec for {plugin}, setup with lazy");
+    } else {
+        let plugin_config = r#"return {
+              "%name",
+              opts = {},
+              lazy = false
+            }
+        "#;
+        plugin_file_content = plugin_config.replace("%name", plugin)
+    }
+
     fs::write(file_path, plugin_file_content).unwrap_or_else(|e| {
         panic!("Error creating plugin config file: {}", e);
     });
@@ -126,7 +163,7 @@ pub fn run(args: &cli::ClArgs) -> Result<(), Box<dyn Error>> {
             run_nvim(extra_args)?;
         }
         Some(cli::Commands::Add { plugin }) => {
-            add_package(plugin);
+            add_plugin(plugin);
         }
         None => {}
     }

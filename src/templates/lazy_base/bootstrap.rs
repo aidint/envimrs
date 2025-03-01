@@ -1,4 +1,4 @@
-use crate::get_config_dir;
+use crate::get_current_config_dir;
 use crate::templates::ensure_paths;
 use std::fs;
 
@@ -7,20 +7,20 @@ pub fn deploy() {
     let config = include_bytes!("files/lua/config/lazy.lua");
 
     let paths = [
-        get_config_dir(),
-        get_config_dir().join("lua"),
-        get_config_dir().join("lua").join("config"),
+        get_current_config_dir(),
+        get_current_config_dir().join("lua"),
+        get_current_config_dir().join("lua").join("config"),
     ];
 
     ensure_paths(&paths);
 
-    match fs::write(get_config_dir().join("init.lua"), init) {
+    match fs::write(get_current_config_dir().join("init.lua"), init) {
         Ok(_) => (),
         Err(e) => panic!("Writing init.lua: File system error: {e}"),
     };
 
     match fs::write(
-        get_config_dir().join("lua").join("config").join("lazy.lua"),
+        get_current_config_dir().join("lua").join("config").join("lazy.lua"),
         config,
     ) {
         Ok(_) => (),
