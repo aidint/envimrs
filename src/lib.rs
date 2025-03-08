@@ -2,10 +2,10 @@ use std::env;
 use std::error::Error;
 use std::{collections::HashMap, fs, io, path::PathBuf, process::Command};
 
-use regex::Regex;
-
+mod add_plugin;
 pub mod cli;
 mod templates;
+mod toml_config;
 
 const TEMPLATES: [&str; 2] = ["lazyvim", "lazy"];
 
@@ -98,60 +98,6 @@ fn run_init(template: &str) {
     }
 }
 
-fn add_plugin(plugin: &str) {
-    let plugins_path = PathBuf::from(".nvim").join("plugins");
-    match fs::create_dir_all(&plugins_path) {
-        io::Result::Err(e) => {
-            if e.kind() == io::ErrorKind::AlreadyExists {
-                println!("Directory already exists");
-            } else {
-                panic!("Error creating directory: {e}");
-            }
-        }
-        Ok(_) => {}
-    }
-
-    let re = Regex::new(r"(?<author>.+)/(?<plugin_name>.+)").unwrap();
-    let Some(caps) = re.captures(plugin) else {
-        panic!("Plugin name doesn't conform with {{author}}/{{plugin-name (without any dots)}}(.nvim)*")
-    };
-
-    let plugin_name = &caps["plugin_name"];
-    let author = &caps["author"];
-
-    let spec_v = vec![
-        "index",
-        "plugins",
-        author,
-        plugin_name,
-        "default",
-        "lazy",
-        "spec.lua",
-    ];
-
-    let spec = spec_v.iter().fold(get_data_dir(), |acc, x| acc.join(x));
-
-    let file_path = plugins_path.join(format!("{}.lua", plugin_name));
-    let plugin_file_content;
-
-    if fs::exists(&spec).unwrap() {
-        plugin_file_content = fs::read_to_string(&spec).unwrap();
-        println!("Using default spec for {plugin}, setup with lazy");
-    } else {
-        let plugin_config = r#"return {
-              "%name",
-              opts = {},
-              lazy = false
-            }
-        "#;
-        plugin_file_content = plugin_config.replace("%name", plugin)
-    }
-
-    fs::write(file_path, plugin_file_content).unwrap_or_else(|e| {
-        panic!("Error creating plugin config file: {}", e);
-    });
-}
-
 pub fn run(args: &cli::ClArgs) -> Result<(), Box<dyn Error>> {
     match &args.command {
         Some(cli::Commands::Init { template }) => {
@@ -163,7 +109,8 @@ pub fn run(args: &cli::ClArgs) -> Result<(), Box<dyn Error>> {
             run_nvim(extra_args)?;
         }
         Some(cli::Commands::Add { plugin }) => {
-            add_plugin(plugin);
+            let add_info = add_plugin::add_plugin(plugin);
+            add_plugin::update_config(&add_info);
         }
         None => {}
     }
