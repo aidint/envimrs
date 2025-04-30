@@ -2,19 +2,26 @@ use std::{fs, io, path::PathBuf};
 
 use regex::Regex;
 
-use crate::toml_config;
+use crate::config::{get_config, Dependency, EnvimConfig};
 
+mod git;
+
+#[derive(Debug)]
 pub struct PluginAdditionInfo<'a> {
     plugin_name: &'a str,
-    config_path: PathBuf,
+    commit: Option<String>,
+    tag: Option<String>,
 }
 
 #[must_use]
 pub fn add_plugin(plugin: &str) -> PluginAdditionInfo {
+    // create the plugins path if it doesn't exist
     let plugins_path = PathBuf::from(".nvim").join("plugins");
     match fs::create_dir_all(&plugins_path) {
         io::Result::Err(e) => {
             if e.kind() == io::ErrorKind::AlreadyExists {
+                // TODO: there is no need for this println!
+                // remove it
                 println!("Directory already exists");
             } else {
                 panic!("Error creating directory: {e}");
@@ -23,13 +30,19 @@ pub fn add_plugin(plugin: &str) -> PluginAdditionInfo {
         Ok(_) => {}
     }
 
+    // find the spec file in the index given the author and plugin name
+    // TODO: add version and commit to this
+
     let re = Regex::new(r"(?<author>.+)/(?<plugin_name>.+)").unwrap();
     let Some(caps) = re.captures(plugin) else {
-        panic!("Plugin name doesn't conform with {{author}}/{{plugin-name (without any dots)}}(.nvim)*")
+        panic!("Plugin name doesn't conform with {{author}}/{{plugin-name}}")
     };
 
     let plugin_name = &caps["plugin_name"];
     let author = &caps["author"];
+
+    // find the latest commit
+    let git::PackageVersion::Commit(commit) = git::get_package_latest_version(plugin);
 
     let spec_v = vec![
         "index",
@@ -45,21 +58,31 @@ pub fn add_plugin(plugin: &str) -> PluginAdditionInfo {
         .iter()
         .fold(crate::get_data_dir(), |acc, x| acc.join(x));
 
-    let file_path = plugins_path.join(format!("{}.lua", plugin_name));
+    // save the spec as the {plugin_name}.lua in the plugins_path
+    let file_path = plugins_path.join(if plugin_name.ends_with(".lua") {
+        format!("{}", plugin_name)
+    } else {
+        format!("{}.lua", plugin_name)
+    });
     let plugin_config_content;
 
     if fs::exists(&spec).unwrap() {
         plugin_config_content = fs::read_to_string(&spec).unwrap();
         println!("Using default spec for {plugin}, setup with lazy");
     } else {
-        let config_template = r#"return {
-              "%name",
-              opts = {},
-              lazy = false
-            }
-        "#;
-        plugin_config_content = config_template.replace("%name", plugin)
+        plugin_config_content = r#"return {
+  "%name",
+  commit = "%commit",
+  opts = {},
+  lazy = false
+}"#
+        .to_string();
     }
+
+    // replace placeholders
+    let plugin_config_content = plugin_config_content
+        .replace("%name", plugin)
+        .replace("%commit", &commit);
 
     fs::write(&file_path, plugin_config_content).unwrap_or_else(|e| {
         panic!("Error creating plugin config file: {}", e);
@@ -67,23 +90,21 @@ pub fn add_plugin(plugin: &str) -> PluginAdditionInfo {
 
     PluginAdditionInfo {
         plugin_name: plugin,
-        config_path: file_path,
+        commit: Some(commit),
+        tag: None,
     }
 }
 
-pub fn update_config(info: &PluginAdditionInfo) {
-    let config_path = PathBuf::from("envim.toml");
-    let mut config: toml_config::EnvimConfig;
+pub fn config_with_plugin(info: PluginAdditionInfo) -> EnvimConfig {
+    let mut config = get_config();
+    let dep = config
+        .workspace
+        .dependencies
+        .entry(info.plugin_name.to_string())
+        .or_insert(Dependency::new());
+    dep.commit = info.commit;
+    dep.tag = info.tag;
 
-    if let Ok(metadata) = fs::metadata(&config_path) {
-        if metadata.is_file() {
-            let envim_config_content =
-                fs::read_to_string(config_path).expect("Couldn't read envim.toml");
-            config = toml::from_str(&envim_config_content).unwrap();
-        } else {
-            panic!("envim.toml is not a file");
-        }
-    }
-    // Otherwise, create the file
-    config.workspace.dependencies
+    config
 }
+

@@ -20,5 +20,6 @@ pub enum Commands {
     Add {
         /// plugin name
         plugin: String
-    }
+    },
+    Test
 }

@@ -4,8 +4,11 @@ use std::{collections::HashMap, fs, io, path::PathBuf, process::Command};
 
 mod add_plugin;
 pub mod cli;
+mod config;
 mod templates;
-mod toml_config;
+
+use add_plugin::add_plugin;
+use config::{config_with_plugin, get_toml_doc, update_config};
 
 const TEMPLATES: [&str; 2] = ["lazyvim", "lazy"];
 
@@ -22,20 +25,12 @@ fn get_current_config_dir() -> PathBuf {
 }
 
 fn get_data_dir() -> PathBuf {
-    if false {
-        let Some(envim_dir) = homedir::my_home().unwrap() else {
-            panic!("Home directory not accessible");
-        };
+    let Some(envim_dir) = homedir::my_home().unwrap() else {
+        panic!("Home directory not accessible");
+    };
 
-        let data_dir = envim_dir.join(".local").join("share").join(".envim");
-        if !fs::exists(&data_dir).unwrap() {
-            fs::create_dir_all(&data_dir).expect("Couldn't create data directory");
-        }
-
-        return data_dir;
-    }
-
-    PathBuf::from(".")
+    let data_dir = envim_dir.join(".local").join("share").join("envim");
+    return data_dir;
 }
 
 fn deploy_template(template: &str) {
@@ -109,8 +104,13 @@ pub fn run(args: &cli::ClArgs) -> Result<(), Box<dyn Error>> {
             run_nvim(extra_args)?;
         }
         Some(cli::Commands::Add { plugin }) => {
-            let add_info = add_plugin::add_plugin(plugin);
-            add_plugin::update_config(&add_info);
+            let add_info = add_plugin(plugin);
+            let config = config_with_plugin(add_info);
+            let mut toml_file = get_toml_doc();
+            update_config(&mut toml_file, &config);
+        }
+        Some(cli::Commands::Test) => {
+            //placeholder for testing
         }
         None => {}
     }

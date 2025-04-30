@@ -10,5 +10,6 @@ homedir = "0.3.4"
 log = "0.4.26"
 regex = "1.11.1"
 serde = { version = "1.0.218", features = ["derive"] }
+tempfile = "3.19.1"
 toml = "0.8.20"
-
+toml_edit = { version = "0.22.25", features = ["serde"] }
