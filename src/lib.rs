@@ -8,7 +8,7 @@ mod config;
 mod templates;
 
 use add_plugin::add_plugin;
-use config::{config_with_plugin, get_toml_doc, update_config};
+use config::config_with_plugin;
 
 const TEMPLATES: [&str; 2] = ["lazyvim", "lazy"];
 
@@ -105,12 +105,35 @@ pub fn run(args: &cli::ClArgs) -> Result<(), Box<dyn Error>> {
         }
         Some(cli::Commands::Add { plugin }) => {
             let add_info = add_plugin(plugin);
-            let config = config_with_plugin(add_info);
-            let mut toml_file = get_toml_doc();
-            update_config(&mut toml_file, &config);
+            let mut config = config_with_plugin(add_info);
+            config.edit_toml();
+            fs::write(PathBuf::from("envim.toml"), config.toml_to_string())?
         }
         Some(cli::Commands::Test) => {
-            //placeholder for testing
+            // let file = fs::read_to_string("/Users/aidin/Documents/code/mine/nvim/envim-rust-try/envim-cli/test_dir/envim.toml")?;
+            // let mut doc = file.parse::<toml_edit::DocumentMut>()?;
+            let mut doc = toml_edit::DocumentMut::new();
+
+            let mut hasher = HashMap::<&'_ str, i64>::new();
+            hasher.insert("hi", 1);
+            hasher.insert("bye", 2);
+
+            doc["workspace"] = toml_edit::Item::Value(toml_edit::Value::from_iter(hasher));
+
+            // doc["workspace"].as_table_mut().map(|t| t.set_implicit(true));
+            // doc["workspace"]["dependencies"] = toml_edit::table();
+            // doc["workspace"]["a"] = toml_edit::value(1);
+            // let table = doc["workspace"]["dependencies"]
+            //     .clone()
+            //     .into_table()
+            //     .unwrap();
+            //
+            // let (key, _) = table.get_key_value("a").unwrap();
+            //
+            // println!("{key}");
+            // println!("it is a value: {:#?}", doc["workspace"]["dependencies"]["a"].as_table_mut().unwrap().key_mut("b"));
+            // doc["workspace"]["dependencies"]["a"].as_table_mut().map(|t| t.fmt());
+            println!("{doc}")
         }
         None => {}
     }

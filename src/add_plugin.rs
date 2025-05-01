@@ -107,4 +107,3 @@ pub fn config_with_plugin(info: PluginAdditionInfo) -> EnvimConfig {
 
     config
 }
-

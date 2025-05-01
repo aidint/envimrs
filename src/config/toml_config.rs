@@ -2,6 +2,11 @@ use std::collections::HashMap;
 
 use serde::de::Error as SerdeError;
 use serde::{Deserialize, Serialize};
+use toml_edit::{DocumentMut, InlineTable, Item, Value};
+
+pub trait TomlEditor {
+    fn edit_toml_table(&self, table: &mut Item);
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -42,14 +47,18 @@ impl<'de> Deserialize<'de> for Dependency {
 
 // toml file structure
 
+type DependencyMap = HashMap<String, Dependency>;
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct EnvimConfig {
+    #[serde(skip_serializing, skip_deserializing)]
+    toml_doc: DocumentMut,
     pub workspace: Workspace,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Workspace {
-    pub dependencies: HashMap<String, Dependency>,
+    pub dependencies: DependencyMap,
     pub plugin_manager: PluginManager,
 }
 
@@ -64,11 +73,36 @@ pub struct Dependency {
 impl EnvimConfig {
     pub fn new() -> Self {
         EnvimConfig {
+            toml_doc: DocumentMut::new(),
             workspace: Workspace {
                 plugin_manager: PluginManager::Lazy,
                 dependencies: HashMap::new(),
             },
         }
+    }
+
+    pub fn edit_toml(&mut self) {
+        if !self
+            .toml_doc
+            .get_key_value("workspace")
+            .is_some_and(|(_, y)| y.is_table())
+        {
+            self.toml_doc["workspace"] = toml_edit::table();
+            self.toml_doc["workspace"]
+                .as_table_mut()
+                .map(|t| t.set_implicit(true));
+        }
+
+        self.workspace
+            .edit_toml_table(&mut self.toml_doc["workspace"]);
+    }
+
+    pub fn toml_to_string(&self) -> String {
+        self.toml_doc.to_string()
+    }
+
+    pub fn set_doc(&mut self, doc: DocumentMut) {
+        self.toml_doc = doc;
     }
 }
 
@@ -79,5 +113,62 @@ impl Dependency {
             tag: None,
             commit: None,
         }
+    }
+}
+
+// TomlEditor trait for PluginManager
+
+impl TomlEditor for PluginManager {
+    fn edit_toml_table(&self, table: &mut Item) {
+        table["plugin_manager"] = toml_edit::value(match self {
+            PluginManager::Lazy => "lazy",
+        });
+    }
+}
+
+// TomlEditor for DependencyMap
+
+impl TomlEditor for DependencyMap {
+    fn edit_toml_table(&self, table: &mut Item) {
+        for (key, val) in self {
+            table[key] = Item::Value(val.into());
+        }
+    }
+}
+
+// TomlEditor for Workspace
+
+impl TomlEditor for Workspace {
+    fn edit_toml_table(&self, table: &mut Item) {
+        if !table
+            .get("dependencies")
+            .is_some_and(|x| x.is_table())
+        {
+            table["dependencies"] = toml_edit::table();
+        }
+
+        self.plugin_manager.edit_toml_table(table);
+        self.dependencies
+            .edit_toml_table(&mut table["dependencies"]);
+    }
+}
+
+// toml_edit::Value::From<Dependency>
+
+impl From<&Dependency> for Value {
+    fn from(dep: &Dependency) -> Self {
+        if dep.tag.is_some() && dep.commit.is_none() {
+            return dep.tag.as_ref().unwrap().into();
+        }
+
+        if let Some(commit) = &dep.commit {
+            let mut tbl = InlineTable::new();
+            tbl.insert("commit", commit.into());
+            if let Some(tag) = &dep.tag {
+                tbl.insert("tag", tag.into());
+            }
+            return Value::InlineTable(tbl);
+        }
+        unreachable!()
     }
 }
